@@ -229,8 +229,8 @@ p.sendline(payload)
 p.interactive()
 ```
 
-Kết quả chạy local
-![image](https://user-images.githubusercontent.com/44528004/147432893-5bbe0f30-343e-4f31-a622-0277bcacdf7e.png)
+Kết quả chạy local:  
+![image](https://user-images.githubusercontent.com/44528004/147433182-9a2eeb3d-b250-4e26-bee8-d97c07406730.png)
 
 > Vì khi viết writeup này, remote đã đóng nên chỉ demo local.  
 
