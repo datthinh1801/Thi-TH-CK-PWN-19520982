@@ -32,8 +32,6 @@ Tiếp theo là hàm `func2`. Hàm này sẽ gán `check4` bằng `1` nếu `che
 Vì mục tiêu của chúng ta là các biến `check2`, `check3`, `check4` phải khác `0` nên ta sẽ cố gắng làm thoả các điều kiện để các biến này có được giá trị khác `0`. Ta sẽ lần lượt exploit `check2`, `check3` rồi đến `check4` vì `check4` phụ thuộc vào `check3` và `check3` phụ thuộc vào `check2`. Do đó, thứ tự gọi hàm tương ứng sẽ là `main` -> `func1` -> `func2` -> `win`.  
 
 #### Return về được `func1`
-Đầu tiên là `check2`. Ở `func1`, để `check2 = 1`, ta sẽ truyền chuỗi `I\'m sorry, don\'t leave me. I want you here with me ~~` vào vị trí nào đó trong buffer để biến `local_58` trong hàm `func1` sẽ bằng với chuỗi trên. Lúc này, ta sẽ có `check2 == 1` vì `strcmp` sẽ trả về `0` nếu 2 chuỗi bằng nhau. Vậy nếu ta gọi lại `func1` lần nữa, `check2` lúc này sẽ có giá trị là `1`. Tiếp theo, ta cần truyền giá trị `0x20010508` vào vị trí nào đó trên buffer để khi hàm truy xuất đến `param_1` sẽ lấy được giá trị `0x20010508` và làm thoả mãn điều kiện.  
-
 Sau khi debug, ta có được bảng sau:  
 
 | Đối tượng | Địa chỉ trên stack | Khoảng cách so với buffer (byte) |
@@ -53,8 +51,10 @@ Khi thử debug với payload trên thì ta thấy được là ta đã return v
 
 ![image](https://user-images.githubusercontent.com/44528004/147410362-2037df27-4751-4123-82d7-c0d93bca4d91.png)  
 
-#### Ghi các giá trị vào buffer để thoả mãn các điều kiện trong `func1`
-Đầu tiên, ta sẽ chèn chuỗi `I\'m sorry, don\'t leave me. I want you here with me ~~` vào buffer. Khi `disass` hàm `func1`, ta thấy được rằng `local_58` nằm tại `ebp - 0x54` (vì `local_58` là đối số thứ 1 của hàm `strcmp` nên sẽ được push vào stack sau).  
+#### Truyền chuỗi vào buffer để thoả mãn điều kiện của `strcmp` trong `func1`
+Ở `func1`, để `check2 = 1`, ta sẽ truyền chuỗi `I\'m sorry, don\'t leave me. I want you here with me ~~` vào vị trí nào đó trong buffer để biến `local_58` trong hàm `func1` sẽ bằng với chuỗi trên. Lúc này, ta sẽ có `check2 == 1` vì `strcmp` sẽ trả về `0` nếu 2 chuỗi bằng nhau. Vậy nếu ta gọi lại `func1` lần nữa, `check2` lúc này sẽ có giá trị là `1`. Tiếp theo, ta cần truyền giá trị `0x20010508` vào vị trí nào đó trên buffer để khi hàm truy xuất đến `param_1` sẽ lấy được giá trị `0x20010508` và làm thoả mãn điều kiện.  
+
+Khi `disass` hàm `func1`, ta thấy được rằng `local_58` nằm tại `ebp - 0x54` (vì `local_58` là đối số thứ 1 của hàm `strcmp` nên sẽ được push vào stack sau).  
 
 ![image](https://user-images.githubusercontent.com/44528004/147410799-3ed87810-c625-42f8-9849-14dfd62710ec.png)  
 
@@ -69,7 +69,6 @@ Ta debug, xem các địa chỉ và lập được bảng sau:
 |---|---|---|
 | `ebp` của hàm `func1` | `0xffffd07c` | - |
 | `local_58` | `ebp - 0x54 = 0xffffd07c - 0x54 = 0xffffd028` | 0x4 |
-| `param_1` | `ebp + 0x8 = 0xffffd084` | 0x60 |
 | `return address` của hàm `func1` | `0xffffd080` | 0x5c |
 
 Vậy payload của ta lúc này sẽ là:  
@@ -79,5 +78,46 @@ func1_addr = e.symbols['func1']
 func2_addr = e.symbols['func2']
 
 payload = b'A' * 0x4 + b'I\'m sorry, don\'t leave me, I want you here with me ~~\x00'
-payload += (0x58 - len(payload)) * b'A' + p32(func1_addr) + p32(func1_addr)
+payload += (0x58 - len(payload)) * b'A' + p32(func1_addr)
+payload += p32(func1_addr)
 ```
+
+Lúc này ta debug thì thấy được là ta đã chèn thành công chuỗi `I\'m sorry, don\'t leave me. I want you here with me ~~` vào stack để pass được điều kiện so sánh `strcmp`.  
+
+![image](https://user-images.githubusercontent.com/44528004/147430599-424e0bc4-b9a7-4047-9466-0b4421b05699.png)  
+
+Ta cũng thành công trong việc gọi hàm `func1` lần 2 để có giá trị `check2 = 1`.  
+
+![image](https://user-images.githubusercontent.com/44528004/147430648-9c75f38b-d281-4e31-961c-1b85cb9ed685.png)  
+
+
+#### Truyền giá trị vào `param_1` 
+Ở lần gọi hàm `func1` lần thứ 2, thanh ghi `ebp` đang trỏ tới `0xffffd080` nên ta sẽ debug và lập bảng sau:
+
+| Đối tượng | Địa chỉ trên stack | Khoảng cách so với buffer (byte) |
+|---|---|---|
+| `ebp` của hàm `func1` lần 2 | `0xffffd080` | - |
+| `param_1` | `ebp + 0x8 = 0xffffd088` | 0x64 |
+| `return address` của hàm `func1` lần 2 | `0xffffd084` | 0x60 |
+
+Từ đây, ta có payload sau:
+```python
+e = ELF('./stack_architect')
+
+func1_addr = e.symbols['func1']
+func2_addr = e.symbols['func2']
+
+payload = b'A' * 0x4 + b'I\'m sorry, don\'t leave me, I want you here with me ~~\x00'
+payload += (0x58 - len(payload)) * b'A'  + p32(func1_addr)
+payload += p32(func1_addr)
+payload += p32(func2_addr)
+payload += p32(0x20010508)
+```
+
+Khi debug thì ta thấy được rằng `param_1` đã được gán bằng `0x20010508`.  
+
+![image](https://user-images.githubusercontent.com/44528004/147431307-547bb427-651c-4f01-a664-0065018de550.png)
+
+Đồng thời, ta cũng thấy được rằng chương trình đã return được về `func2`.  
+
+![image](https://user-images.githubusercontent.com/44528004/147431410-d7f04924-d681-4068-b7d3-45ef41b7cc20.png)
